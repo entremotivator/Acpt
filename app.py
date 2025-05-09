@@ -262,7 +262,7 @@ def render_sidebar():
         if st.button("Logout", type="primary", use_container_width=True):
             for key in st.session_state.keys():
                 del st.session_state[key]
-            st.experimental_rerun()
+            st.rerun()
 
 # Function to render the dashboard
 def render_dashboard():
@@ -284,7 +284,7 @@ def render_dashboard():
                 st.session_state.current_page = "post_edit"
                 st.session_state.current_post_type = post_type
                 st.session_state.current_post = None
-                st.experimental_rerun()
+                st.rerun()
 
 # Function to render the post list
 def render_post_list():
@@ -297,7 +297,7 @@ def render_post_list():
     if st.button(f"Add New {type_info.get('name', post_type)}", type="primary"):
         st.session_state.current_page = "post_edit"
         st.session_state.current_post = None
-        st.experimental_rerun()
+        st.rerun()
     
     # Display posts in a table
     if st.session_state.current_posts:
@@ -324,7 +324,7 @@ def render_post_list():
                         if delete_post(post_type, post['id']):
                             st.success(f"Post '{title}' deleted successfully")
                             get_posts(post_type)
-                            st.experimental_rerun()
+                            st.rerun()
             
             st.divider()
     else:
@@ -432,12 +432,12 @@ def render_post_edit():
                 get_posts(post_type)
                 # Go back to post list
                 st.session_state.current_page = "post_list"
-                st.experimental_rerun()
+                st.rerun()
     
     # Cancel button
     if st.button("Cancel"):
         st.session_state.current_page = "post_list"
-        st.experimental_rerun()
+        st.rerun()
 
 # Main app logic
 def main():
