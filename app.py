@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import json
-import os
+import base64
 from datetime import datetime
 
 # Set page config
@@ -15,8 +15,8 @@ st.set_page_config(
 # Initialize session state variables
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
-if 'token' not in st.session_state:
-    st.session_state.token = None
+if 'auth_header' not in st.session_state:
+    st.session_state.auth_header = None
 if 'wp_url' not in st.session_state:
     st.session_state.wp_url = ""
 if 'user_info' not in st.session_state:
@@ -34,35 +34,43 @@ if 'current_post' not in st.session_state:
 if 'meta_boxes' not in st.session_state:
     st.session_state.meta_boxes = []
 
-# Function to authenticate with WordPress
+# Function to authenticate with WordPress using basic auth or application password
 def authenticate(url, username, password):
     try:
-        auth_url = f"{url}/wp-json/jwt-auth/v1/token"
-        response = requests.post(auth_url, data={
-            'username': username,
-            'password': password
-        })
+        # Remove trailing slash if present
+        url = url.rstrip('/')
         
-        if response.status_code == 200:
-            data = response.json()
-            st.session_state.token = data['token']
+        # Create basic auth header
+        auth_string = f"{username}:{password}"
+        encoded_auth = base64.b64encode(auth_string.encode()).decode()
+        auth_header = f"Basic {encoded_auth}"
+        
+        # Test authentication by getting user info
+        user_response = requests.get(
+            f"{url}/wp-json/wp/v2/users/me",
+            headers={'Authorization': auth_header}
+        )
+        
+        if user_response.status_code == 200:
+            st.session_state.auth_header = auth_header
             st.session_state.authenticated = True
             st.session_state.wp_url = url
-            
-            # Get user info
-            user_response = requests.get(
-                f"{url}/wp-json/wp/v2/users/me",
-                headers={'Authorization': f'Bearer {st.session_state.token}'}
-            )
-            if user_response.status_code == 200:
-                st.session_state.user_info = user_response.json()
+            st.session_state.user_info = user_response.json()
             
             # Get available post types
             get_post_types()
             
             return True
         else:
-            st.error(f"Authentication failed: {response.json().get('message', 'Unknown error')}")
+            error_msg = "Authentication failed"
+            try:
+                error_data = user_response.json()
+                if 'message' in error_data:
+                    error_msg = f"Authentication failed: {error_data['message']}"
+            except:
+                error_msg = f"Authentication failed: HTTP {user_response.status_code}"
+            
+            st.error(error_msg)
             return False
     except Exception as e:
         st.error(f"Error connecting to WordPress site: {str(e)}")
@@ -73,7 +81,7 @@ def get_post_types():
     try:
         response = requests.get(
             f"{st.session_state.wp_url}/wp-json/wp/v2/types",
-            headers={'Authorization': f'Bearer {st.session_state.token}'}
+            headers={'Authorization': st.session_state.auth_header}
         )
         
         if response.status_code == 200:
@@ -92,7 +100,7 @@ def get_posts(post_type):
     try:
         response = requests.get(
             f"{st.session_state.wp_url}/wp-json/wp/v2/{post_type}",
-            headers={'Authorization': f'Bearer {st.session_state.token}'}
+            headers={'Authorization': st.session_state.auth_header}
         )
         
         if response.status_code == 200:
@@ -111,7 +119,7 @@ def get_post(post_type, post_id):
     try:
         response = requests.get(
             f"{st.session_state.wp_url}/wp-json/wp/v2/{post_type}/{post_id}",
-            headers={'Authorization': f'Bearer {st.session_state.token}'}
+            headers={'Authorization': st.session_state.auth_header}
         )
         
         if response.status_code == 200:
@@ -124,7 +132,13 @@ def get_post(post_type, post_id):
             
             return post_data
         else:
-            st.error(f"Failed to retrieve post: {response.json().get('message', 'Unknown error')}")
+            st.error(f"Failed to retrieve post: {response.status_code}")
+            try:
+                error_data = response.json()
+                if 'message' in error_data:
+                    st.error(error_data['message'])
+            except:
+                pass
             return None
     except Exception as e:
         st.error(f"Error getting post: {str(e)}")
@@ -134,7 +148,7 @@ def get_post(post_type, post_id):
 def save_post(post_type, post_data, post_id=None):
     try:
         headers = {
-            'Authorization': f'Bearer {st.session_state.token}',
+            'Authorization': st.session_state.auth_header,
             'Content-Type': 'application/json'
         }
         
@@ -148,7 +162,13 @@ def save_post(post_type, post_data, post_id=None):
         if response.status_code in [200, 201]:
             return response.json()
         else:
-            st.error(f"Failed to save post: {response.json().get('message', 'Unknown error')}")
+            st.error(f"Failed to save post: {response.status_code}")
+            try:
+                error_data = response.json()
+                if 'message' in error_data:
+                    st.error(error_data['message'])
+            except:
+                pass
             return None
     except Exception as e:
         st.error(f"Error saving post: {str(e)}")
@@ -160,13 +180,19 @@ def delete_post(post_type, post_id):
         url = f"{st.session_state.wp_url}/wp-json/wp/v2/{post_type}/{post_id}?force=true"
         response = requests.delete(
             url,
-            headers={'Authorization': f'Bearer {st.session_state.token}'}
+            headers={'Authorization': st.session_state.auth_header}
         )
         
         if response.status_code == 200:
             return True
         else:
-            st.error(f"Failed to delete post: {response.json().get('message', 'Unknown error')}")
+            st.error(f"Failed to delete post: {response.status_code}")
+            try:
+                error_data = response.json()
+                if 'message' in error_data:
+                    st.error(error_data['message'])
+            except:
+                pass
             return False
     except Exception as e:
         st.error(f"Error deleting post: {str(e)}")
@@ -175,18 +201,38 @@ def delete_post(post_type, post_id):
 # Function to render the login form
 def render_login_form():
     st.title("WordPress CPT Manager")
+    st.subheader("Login with WordPress credentials")
     
     with st.form("login_form"):
         wp_url = st.text_input("WordPress Site URL", placeholder="https://example.com")
         username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Login")
+        password = st.text_input("Password", type="password", help="Use your WordPress password or application password")
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            submit = st.form_submit_button("Login", use_container_width=True)
         
         if submit:
             if wp_url and username and password:
                 authenticate(wp_url, username, password)
             else:
                 st.error("Please fill in all fields")
+    
+    st.info("""
+    ### Authentication Help
+    
+    This app uses WordPress REST API authentication. You have two options:
+    
+    1. **WordPress Application Password** (Recommended):
+       - Go to your WordPress admin → Users → Profile
+       - Scroll down to "Application Passwords"
+       - Create a new application password for "CPT Manager"
+       - Use this password instead of your regular WordPress password
+    
+    2. **Basic Authentication**:
+       - If your site has Basic Auth enabled, you can use your regular WordPress credentials
+       - Note: This is less secure and may not work on all WordPress installations
+    """)
 
 # Function to render the sidebar
 def render_sidebar():
@@ -196,6 +242,7 @@ def render_sidebar():
         # User info
         if st.session_state.user_info:
             st.write(f"Logged in as: {st.session_state.user_info.get('name', 'User')}")
+            st.write(f"Site: {st.session_state.wp_url}")
         
         # Navigation buttons
         if st.button("Dashboard", use_container_width=True):
@@ -254,7 +301,6 @@ def render_post_list():
     
     # Display posts in a table
     if st.session_state.current_posts:
-        data = []
         for post in st.session_state.current_posts:
             title = post.get('title', {}).get('rendered', 'Untitled')
             date = datetime.fromisoformat(post.get('date', '').replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
@@ -386,12 +432,12 @@ def render_post_edit():
                 get_posts(post_type)
                 # Go back to post list
                 st.session_state.current_page = "post_list"
-                st.rerun()
+                st.experimental_rerun()
     
     # Cancel button
     if st.button("Cancel"):
         st.session_state.current_page = "post_list"
-        st.rerun()
+        st.experimental_rerun()
 
 # Main app logic
 def main():
